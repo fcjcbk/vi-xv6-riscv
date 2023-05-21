@@ -25,6 +25,8 @@
 #define BACKSPACE 0x100
 #define C(x)  ((x)-'@')  // Control-x
 
+int vi_flag = 0;
+
 //
 // send one character to the uart.
 // called by printf(), and to echo input characters,
@@ -99,7 +101,7 @@ consoleread(int user_dst, uint64 dst, int n)
     c = cons.buf[cons.r++ % INPUT_BUF_SIZE];
 
     if(c == C('D')){  // end-of-file
-      if(n < target){
+      if(n < target && !vi_flag){
         // Save ^D for next time, to make sure
         // caller gets a 0-byte result.
         cons.r--;
@@ -115,7 +117,7 @@ consoleread(int user_dst, uint64 dst, int n)
     dst++;
     --n;
 
-    if(c == '\n'){
+    if(c == '\n' && !vi_flag){
       // a whole line has arrived, return to
       // the user-level read().
       break;
@@ -165,7 +167,7 @@ consoleintr(int c)
       // store for consumption by consoleread().
       cons.buf[cons.e++ % INPUT_BUF_SIZE] = c;
 
-      if(c == '\n' || c == C('D') || cons.e-cons.r == INPUT_BUF_SIZE){
+      if(c == '\n' || c == C('D') || cons.e-cons.r == INPUT_BUF_SIZE || vi_flag){
         // wake up consoleread() if a whole line (or end-of-file)
         // has arrived.
         cons.w = cons.e;
@@ -189,4 +191,12 @@ consoleinit(void)
   // to consoleread and consolewrite.
   devsw[CONSOLE].read = consoleread;
   devsw[CONSOLE].write = consolewrite;
+}
+
+void setflag() {
+  vi_flag = 1;
+}
+
+void eraseflag() {
+  vi_flag = 0;
 }

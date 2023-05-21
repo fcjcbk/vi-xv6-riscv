@@ -503,3 +503,17 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_setviflag(void)
+{
+  setflag();
+  return 0;
+}
+
+uint64
+sys_eraseviflag(void)
+{
+  eraseflag();
+  return 0;
+}

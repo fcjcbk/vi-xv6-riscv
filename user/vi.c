@@ -1,9 +1,7 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <termios.h>
+#include "kernel/types.h"
+#include "kernel/stat.h"
+#include "user/user.h"
+#include "kernel/fcntl.h"
 
 // screen
 //  statusbar is append after SCREEN_HEIGHT screen
@@ -33,6 +31,8 @@
 
 // esc sequence
 #define term_cursor_location(x,y) fprintf(stdout, "\033[%d;%dH" ,y,x)
+
+#define stdout 1
 
 // globals
 int mode;
@@ -64,7 +64,7 @@ struct screen{
   struct linebuffer *upperline;
 }screen;
 
-struct termios termios;
+// struct termios termios;
 
 char inputfilename[64];
 char outputfilename[64];
@@ -124,10 +124,10 @@ void cursor_init(struct linebuffer *lbp){
 void terminal_cursor_update(){
   if(command){
     term_cursor_location(STATUSBAR_MESSAGE_START+statusbar.msglength, SCREEN_HEIGHT+1);
-    fflush(stdout);
+    // fflush(stdout);
   }else{
     term_cursor_location(cursor.x+1, cursor.y-screen.line+1);
-    fflush(stdout);
+    // fflush(stdout);
   }
 }
 void cursor_up(){
@@ -353,7 +353,7 @@ void deleteline_normal(){
   n = cursor.linebuffer->next;
 
   if(p == &linebuffer_head && n == &linebuffer_tail){
-    memset(cursor.linebuffer->buf, '\0', sizeof(cursor.linebuffer->buf));
+    memset(cursor.linebuffer->buf, '\0', LINE_BUFFER_LENGTH);
     cursor.linebuffer->size = 0;
     return;
   }
@@ -371,37 +371,65 @@ void deleteline_normal(){
   }
 }
 
-void save(){
-  FILE *ofile;
-  struct linebuffer *lbp;
+char*
+fgets(int fd, char *buf, int max)
+{
+  int i, cc;
+  char c;
 
-  ofile = fopen(outputfilename, "w+");
+  for(i=0; i+1 < max; ){
+    cc = read(fd, &c, 1);
+    if(cc < 1)
+      break;
+    buf[i++] = c;
+    if(c == '\n' || c == '\r')
+      break;
+  }
+  buf[i] = '\0';
+  return buf;
+}
+
+void save(){
+
+  struct linebuffer *lbp;
+  int fd;
+
+  fd = open(outputfilename, O_CREATE | O_TRUNC | O_WRONLY);
+
+  if (fd < 0) {
+    exit(-1);
+  }
 
   lbp = linebuffer_head.next;
-  while(lbp != &linebuffer_tail){
-    fprintf(ofile, "%s", lbp->buf);
+  while (lbp != &linebuffer_tail) {
+    fprintf(fd, "%s", lbp->buf);
     lbp = lbp->next;
   }
-  fclose(ofile);
+
+  close(fd);
 }
 
 void load(){
-  FILE *ifile;
+
   char buf[LINE_BUFFER_LENGTH];
-  int len;
+
   struct linebuffer *lbp,*lbpnext;
 
-  ifile = fopen(inputfilename, "r");
-  if(ifile == 0) return;
+  int fd = open(inputfilename, O_RDONLY);
+  if (fd < 0) {
+    return;
+  }
 
   lbp  = &linebuffer_head;
-  while(fgets(buf, sizeof(buf), ifile) != 0){
+  fgets(fd, buf, sizeof(buf));
+  while(buf[0] != 0){
     lbpnext = create_linebuffer();
     strcpy(lbpnext->buf, buf);
     lbpnext->size = strlen(buf)-1;
     link_linebuffer(lbp, lbpnext);
     lbp  = lbpnext;
     memset(buf, '\0', sizeof(buf));
+    fgets(fd, buf, sizeof(buf));
   }
   link_linebuffer(lbp, &linebuffer_tail);
   
@@ -410,7 +438,8 @@ void load(){
   cursor.y = 1;
   screen.upperline = linebuffer_head.next;
 
-  fclose(ifile);
+  // fclose(ifile);
+  close(fd);
 }
 
 void quit(){
@@ -540,15 +569,15 @@ void input_hook(){
 }
 
 // term
-void init_term(){
-  tcgetattr(0, &termios);
-  termios.c_lflag &= ~ICANON;
-  tcsetattr(0, TCSANOW, &termios);
-}
-void restore_term(){
-  termios.c_lflag |= ICANON;
-  tcsetattr(0, TCSANOW, &termios);
-}
+// void init_term(){
+//   tcgetattr(0, &termios);
+//   termios.c_lflag &= ~ICANON;
+//   tcsetattr(0, TCSANOW, &termios);
+// }
+// void restore_term(){
+//   termios.c_lflag |= ICANON;
+//   tcsetattr(0, TCSANOW, &termios);
+// }
 
 // init
 void init(){
@@ -589,7 +618,8 @@ int main(int argc, char *argv[]){
   struct linebuffer *top;
 
   init();
-  init_term();
+  setviflag();
+  // init_term();
 
   if(argc == 2){
     strcpy(inputfilename, argv[1]);
@@ -607,8 +637,16 @@ int main(int argc, char *argv[]){
   term_cursor_location(0,0);
   fprintf(stdout,"\033[2J");
 
-  restore_term();
+  // restore_term();
+  eraseviflag();
   cleanup();
 
   exit(0);
+  // printf("\e[3J\e[H\e[2J");
+  // printf("\033[%d;%dH" ,100,10);
+  // printf("hello!\n");
+  // // sleep(100);
+  // printf("\033[%d;%dH" ,10,10);
+  // printf("aaaaaaaaaaaa");
+  // exit(0);
 }
