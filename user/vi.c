@@ -197,7 +197,7 @@ void display(struct linebuffer *head){
 
   term_cursor_location(0,0);
   fprintf(stdout,"\033[2J");
-  while(i-->0){
+  while(i-- > 0){
     fprintf(stdout, "%s", lbp->buf);
     lbp = lbp->next;
     if(i == 2 && lbp == &linebuffer_tail)
@@ -355,6 +355,8 @@ void deleteline_normal(){
   if(p == &linebuffer_head && n == &linebuffer_tail){
     memset(cursor.linebuffer->buf, '\0', LINE_BUFFER_LENGTH);
     cursor.linebuffer->size = 0;
+    cursor.x = 0;
+    cursor.y = 1;
     return;
   }
 
@@ -382,7 +384,7 @@ fgets(int fd, char *buf, int max)
     if(cc < 1)
       break;
     buf[i++] = c;
-    if(c == '\n' || c == '\r')
+    if(c == '\n')
       break;
   }
   buf[i] = '\0';
@@ -642,11 +644,11 @@ int main(int argc, char *argv[]){
   cleanup();
 
   exit(0);
+  // fprintf(stdout,"\033[2J");
   // printf("\e[3J\e[H\e[2J");
   // printf("\033[%d;%dH" ,100,10);
   // printf("hello!\n");
   // // sleep(100);
   // printf("\033[%d;%dH" ,10,10);
-  // printf("aaaaaaaaaaaa");
   // exit(0);
 }
