@@ -22,6 +22,7 @@
 #include "defs.h"
 #include "proc.h"
 
+#define DELETE    127
 #define BACKSPACE 0x100
 #define C(x)  ((x)-'@')  // Control-x
 
@@ -155,6 +156,12 @@ consoleintr(int c)
     if(cons.e != cons.w){
       cons.e--;
       consputc(BACKSPACE);
+    }
+    if (vi_flag) {
+      // store for consumption by consoleread().
+      cons.buf[cons.e++ % INPUT_BUF_SIZE] = c;
+      cons.w = cons.e;
+      wakeup(&cons.r);
     }
     break;
   default:

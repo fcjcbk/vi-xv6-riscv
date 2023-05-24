@@ -28,11 +28,13 @@
 #define KEYCODE_CR   0x0D
 #define KEYCODE_DEL  0x7f
 #define KEYCODE_AT   0x40
+#define DELETE       127
 
 // esc sequence
 #define term_cursor_location(x,y) fprintf(stdout, "\033[%d;%dH" ,y,x)
 
 #define stdout 1
+#define NULL   0
 
 // globals
 int mode;
@@ -306,7 +308,9 @@ void error(char *msg){
 // buffer
 void link_linebuffer(struct linebuffer *l, struct linebuffer *r){
   l->next = r;
-  r->prev = l;
+  if (r != NULL) {
+    r->prev = l;
+  }
 }
 void alloc_linebuffer(struct linebuffer *lb){
   lb->buf  = malloc(LINE_BUFFER_LENGTH);
@@ -319,6 +323,18 @@ struct linebuffer *create_linebuffer(){
   lbp = malloc(sizeof(struct linebuffer));
   alloc_linebuffer(lbp);
   return lbp;
+}
+
+// 如果lhs的size加上rhs的大小比linebuf大则放弃合并。将lhs与rhs合并，合并后rhs应该废弃不用
+int merge_linebuffer(struct linebuffer *lhs, struct linebuffer *rhs) {
+  // 成功返回1, 否则返回-1
+  if (lhs->size + rhs->size >= LINE_BUFFER_LENGTH) {
+    return -1;
+  }
+  for (int i = 0; i < rhs->size; i++) {
+    lhs->buf[lhs->size + i] = rhs->buf[i];
+  }
+  return 1;
 }
 
 // mode
@@ -542,6 +558,23 @@ void input_mode_insert(char c){
   case KEYCODE_CR:
   case KEYCODE_LF:
     enter_insert();
+    return;
+  case DELETE:
+    if (cursor.x == 0 && cursor.linebuffer->size) {
+      if (merge_linebuffer(cursor.linebuffer->prev, cursor.linebuffer) > 0) {
+        deleteline_normal();
+      }
+      return;
+    }
+    if (cursor.x == 0 && cursor.linebuffer->size == 0) {
+      deleteline_normal();
+      cursor.x = cursor.linebuffer->size;
+      return;
+    }
+    cursor_left();
+    delete_normal();
+    cursor_right();
+    
     return;
   default:
     if(!ischaracter(c))
