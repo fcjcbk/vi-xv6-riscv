@@ -1,6 +1,6 @@
 #include "kernel/fcntl.h"
-#include "kernel/types.h"
 #include "kernel/stat.h"
+#include "kernel/types.h"
 #include "user/user.h"
 
 // screen
@@ -29,6 +29,7 @@
 #define KEYCODE_DEL 0x7f
 #define KEYCODE_AT 0x40
 #define KEYCODE_DELETE 127
+#define KEYCODE_TAB 0x9
 
 // esc sequence
 #define term_cursor_location(x, y) fprintf(stdout, "\033[%d;%dH", y, x)
@@ -123,10 +124,8 @@ void terminal_cursor_update() {
   if (command) {
     term_cursor_location(STATUSBAR_MESSAGE_START + statusbar.msglength,
                          SCREEN_HEIGHT + 1);
-    // fflush(stdout);
   } else {
     term_cursor_location(cursor.x + 1, cursor.y - screen.line + 1);
-    // fflush(stdout);
   }
 }
 void cursor_up() {
@@ -375,8 +374,13 @@ void deleteline_normal() {
   if (n != &linebuffer_tail) {
     cursor.linebuffer = n;
   } else {
-    cursor_up();
+    // cursor_up();
     cursor.linebuffer = p;
+    cursor.y--;
+    if (cursor.linebuffer->size < LINE_BUFFER_LENGTH &&
+        cursor.linebuffer->buf[cursor.linebuffer->size] == '\n') {
+      cursor.linebuffer->buf[cursor.linebuffer->size] = 0;
+    }
   }
 }
 
@@ -561,6 +565,16 @@ void handle_backspace() {
     delete_normal();
   }
 }
+
+void handle_tab() {
+  if (cursor.linebuffer->size + 4 >= LINE_BUFFER_LENGTH) {
+    return;
+  }
+  for (int i = 0; i < 4; i++) {
+    character_insert(' ');
+  }
+}
+
 void input_mode_insert(char c) {
   switch (c) {
     case KEYCODE_ESC:
@@ -573,6 +587,8 @@ void input_mode_insert(char c) {
     case KEYCODE_DELETE:
       handle_backspace();
       return;
+    case KEYCODE_TAB:
+      handle_tab();
     default:
       if (!ischaracter(c)) return;
       character_insert(c);
