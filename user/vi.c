@@ -1,6 +1,6 @@
 #include "kernel/fcntl.h"
-#include "kernel/stat.h"
 #include "kernel/types.h"
+#include "kernel/stat.h"
 #include "user/user.h"
 
 // screen
@@ -123,7 +123,7 @@ void cursor_init(struct linebuffer *lbp) {
 void terminal_cursor_update() {
   if (command) {
     term_cursor_location(STATUSBAR_MESSAGE_START + statusbar.msglength,
-                         SCREEN_HEIGHT + 1);
+                         SCREEN_HEIGHT + 2);
   } else {
     term_cursor_location(cursor.x + 1, cursor.y - screen.line + 1);
   }
@@ -361,6 +361,7 @@ void deleteline_normal() {
   if (p == &linebuffer_head && n == &linebuffer_tail) {
     memset(cursor.linebuffer->buf, '\0', LINE_BUFFER_LENGTH);
     cursor.linebuffer->size = 0;
+    cursor.linebuffer->buf[0] = '\n';
     cursor.x = 0;
     cursor.y = 1;
     return;
@@ -377,10 +378,10 @@ void deleteline_normal() {
     // cursor_up();
     cursor.linebuffer = p;
     cursor.y--;
-    if (cursor.linebuffer->size < LINE_BUFFER_LENGTH &&
-        cursor.linebuffer->buf[cursor.linebuffer->size] == '\n') {
-      cursor.linebuffer->buf[cursor.linebuffer->size] = 0;
-    }
+    // if (cursor.linebuffer->size < LINE_BUFFER_LENGTH &&
+    //     cursor.linebuffer->buf[cursor.linebuffer->size] == '\n') {
+    //   cursor.linebuffer->buf[cursor.linebuffer->size] = 0;
+    // }
   }
 }
 
@@ -619,6 +620,7 @@ void input_hook() {
 void init() {
   struct linebuffer *lbp;
   lbp = create_linebuffer();
+  lbp->buf[0] = '\n';
 
   mode = MODE_NORMAL;
   quit_flg = 0;
