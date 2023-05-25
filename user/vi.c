@@ -239,9 +239,19 @@ void set_statusbar_message(char *m){
 void set_statusbar_visibility(int v){
   statusbar.visibility = v;
 }
+
+void statusbar_command_end();
 void insert_statusbar_message(char c){
   int i;
   for(i=0; i+1<STATUSBAR_MESSAGE_LENGTH; i++){
+    if (c == DELETE && statusbar.msg[i + 1] == '\0') {
+      statusbar.msg[i] = '\0';
+      statusbar.msglength--;
+      if (i == 0) {
+        statusbar_command_end();
+      }
+      return;
+    }
     if(statusbar.msg[i] == '\0'){
       statusbar.msglength++;
       statusbar.msg[i] = c;
@@ -334,6 +344,7 @@ int merge_linebuffer(struct linebuffer *lhs, struct linebuffer *rhs) {
   for (int i = 0; i < rhs->size; i++) {
     lhs->buf[lhs->size + i] = rhs->buf[i];
   }
+  lhs->size += rhs->size;
   return 1;
 }
 
@@ -479,8 +490,9 @@ void input_command(char c){
     statusbar_command_begin();
     return;
   default:
-    if(!ischaracter(c))
+    if(!ischaracter(c) && c != DELETE) {
       return;
+    }
     insert_statusbar_message(c);
     return;
   }
@@ -550,19 +562,15 @@ void character_insert(char c){
   cursor_right();
 }
 
-void input_mode_insert(char c){
-  switch(c){
-  case KEYCODE_ESC:
-    mode_change(MODE_NORMAL);
+void handle_backspace() {
+  if (cursor.x == 0 && cursor.y == 1) {
     return;
-  case KEYCODE_CR:
-  case KEYCODE_LF:
-    enter_insert();
-    return;
-  case DELETE:
-    if (cursor.x == 0 && cursor.linebuffer->size) {
+  }  
+  if (cursor.x == 0 && cursor.linebuffer->size) {
       if (merge_linebuffer(cursor.linebuffer->prev, cursor.linebuffer) > 0) {
+        int right_size = cursor.linebuffer->size;
         deleteline_normal();
+        cursor.x = cursor.linebuffer->size - right_size;
       }
       return;
     }
@@ -573,8 +581,18 @@ void input_mode_insert(char c){
     }
     cursor_left();
     delete_normal();
-    cursor_right();
-    
+}
+void input_mode_insert(char c){
+  switch(c){
+  case KEYCODE_ESC:
+    mode_change(MODE_NORMAL);
+    return;
+  case KEYCODE_CR:
+  case KEYCODE_LF:
+    enter_insert();
+    return;
+  case DELETE:
+    handle_backspace();
     return;
   default:
     if(!ischaracter(c))
