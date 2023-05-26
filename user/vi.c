@@ -123,7 +123,7 @@ void cursor_init(struct linebuffer *lbp) {
 void terminal_cursor_update() {
   if (command) {
     term_cursor_location(STATUSBAR_MESSAGE_START + statusbar.msglength,
-                         SCREEN_HEIGHT + 2);
+                         SCREEN_HEIGHT + 1);
   } else {
     term_cursor_location(cursor.x + 1, cursor.y - screen.line + 1);
   }
@@ -178,7 +178,6 @@ cursor.linebuffer->buf); fprintf(stdout, ":::cursor:::\n");
 // display
 void display(struct linebuffer *head) {
   int i, v;
-  int last1istail = 0, last2istail = 0;
   struct linebuffer *lbp;
 
   v = statusbar.visibility == STATUSBAR_VISIBLE;
@@ -188,18 +187,11 @@ void display(struct linebuffer *head) {
   term_cursor_location(0, 0);
   fprintf(stdout, "\033[2J");
   while (i-- > 0) {
-    fprintf(stdout, "%s", lbp->buf);
+    fprintf(stdout, "%s\n", lbp->buf);
     lbp = lbp->next;
-    if (i == 2 && lbp == &linebuffer_tail) last2istail = 1;
-    if (i == 1 && lbp == &linebuffer_tail) last1istail = 1;
   }
 
-  if (last1istail && last2istail) fprintf(stdout, "~\n");
-
   if (v) fprintf(stdout, "%s  %s", statusbar.mode, statusbar.msg);
-
-  // for debug
-  // dump();
 
   terminal_cursor_update();
 }
@@ -361,7 +353,6 @@ void deleteline_normal() {
   if (p == &linebuffer_head && n == &linebuffer_tail) {
     memset(cursor.linebuffer->buf, '\0', LINE_BUFFER_LENGTH);
     cursor.linebuffer->size = 0;
-    cursor.linebuffer->buf[0] = '\n';
     cursor.x = 0;
     cursor.y = 1;
     return;
@@ -372,19 +363,13 @@ void deleteline_normal() {
   free(cursor.linebuffer->buf);
   free(cursor.linebuffer);
 
-  if (n != &linebuffer_tail) {
-    cursor.linebuffer = n;
-  } else {
-    // cursor_up();
-    cursor.linebuffer = p;
-    cursor.y--;
-    // if (cursor.linebuffer->size < LINE_BUFFER_LENGTH &&
-    //     cursor.linebuffer->buf[cursor.linebuffer->size] == '\n') {
-    //   cursor.linebuffer->buf[cursor.linebuffer->size] = 0;
-    // }
+  cursor.linebuffer = n;
+  if (n == &linebuffer_tail) {
+    cursor_up();
   }
 }
 
+// 不会读\n
 char *fgets(int fd, char *buf, int max) {
   int i, cc;
   char c;
@@ -392,8 +377,8 @@ char *fgets(int fd, char *buf, int max) {
   for (i = 0; i + 1 < max;) {
     cc = read(fd, &c, 1);
     if (cc < 1) break;
-    buf[i++] = c;
     if (c == '\n') break;
+    buf[i++] = c;
   }
   buf[i] = '\0';
   return buf;
@@ -446,7 +431,6 @@ void load() {
   cursor.y = 1;
   screen.upperline = linebuffer_head.next;
 
-  // fclose(ifile);
   close(fd);
 }
 
@@ -518,7 +502,6 @@ void enter_insert() {
   strcpy(lbp->buf, cursor.linebuffer->buf + cursor.x);
   lbp->size = cursor.linebuffer->size - cursor.x;
   cursor.linebuffer->size = cursor.x;
-  cursor.linebuffer->buf[cursor.x] = '\n';
   memset(cursor.linebuffer->buf + cursor.x + 1, '\0',
          LINE_BUFFER_LENGTH - cursor.x - 1);
 
@@ -620,7 +603,6 @@ void input_hook() {
 void init() {
   struct linebuffer *lbp;
   lbp = create_linebuffer();
-  lbp->buf[0] = '\n';
 
   mode = MODE_NORMAL;
   quit_flg = 0;
@@ -632,7 +614,7 @@ void init() {
   link_linebuffer(&linebuffer_tail, &linebuffer_tail);
   link_linebuffer(&linebuffer_head, lbp);
   link_linebuffer(lbp, &linebuffer_tail);
-  strcpy(linebuffer_tail.buf, "~\n");
+  strcpy(linebuffer_tail.buf, "~");
 
   // screen_init: after buffer initialization
   screen_init();
