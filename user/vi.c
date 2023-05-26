@@ -20,7 +20,8 @@
 #define STATUSBAR_VISIBLE 1
 #define STATUSBAR_HIDE 2
 #define STATUSBAR_MESSAGE_LENGTH 64
-#define STATUSBAR_MESSAGE_START 11
+#define STATUSBAR_MESSAGE_START 15
+#define FIND_STR_LENGTH 31
 
 // keycode
 #define KEYCODE_ESC 0x1b
@@ -35,6 +36,7 @@
 #define term_cursor_location(x, y) fprintf(stdout, "\033[%d;%dH", y, x)
 
 #define stdout 1
+#define stdin  0
 #define NULL 0
 
 // globals
@@ -68,6 +70,8 @@ struct screen {
   int line;
   struct linebuffer *upperline;
 } screen;
+
+char find_str[FIND_STR_LENGTH + 1];
 
 // struct termios termios;
 
@@ -224,7 +228,7 @@ void display(struct linebuffer *head) {
 void set_statusbar_mode(char *m) { strcpy(statusbar.mode, m); }
 
 void statusbar_init() {
-  set_statusbar_mode("[normal]");
+  set_statusbar_mode("-- NORMAL --");
   statusbar.visibility = STATUSBAR_VISIBLE;
   statusbar.msglength = 0;
 }
@@ -355,10 +359,10 @@ void mode_change(int m) {
   mode = m;
   switch (m) {
     case MODE_INSERT:
-      set_statusbar_mode("[insert]");
+      set_statusbar_mode("-- INSERT --");
       return;
     case MODE_NORMAL:
-      set_statusbar_mode("[normal]");
+      set_statusbar_mode("-- NORMAL --");
       return;
   }
 }
@@ -493,6 +497,35 @@ void input_command(char c) {
   }
 }
 
+void handle_find() {
+  int i = 0;
+  char c;
+  term_cursor_location(STATUSBAR_MESSAGE_START, SCREEN_HEIGHT + 1);
+  printf("/");
+  memset(find_str, 0, sizeof(find_str));
+  while (read(stdin, &c, 1) > 0 && i < FIND_STR_LENGTH) {
+
+    switch (c) {
+      case KEYCODE_ESC:
+        memset(find_str, 0, sizeof(find_str));
+        return;
+      case '\n':
+        return;
+      case KEYCODE_DELETE:
+        printf("\b \b");
+        if (i == 0) {
+          return;
+        }
+        find_str[--i] = 0;
+        break;
+      default:
+        printf("%c", c);
+        find_str[i++] = c;
+        break;
+    }
+  }
+}
+
 void input_mode_normal(char c) {
   if (command) {
     input_command(c);
@@ -527,6 +560,9 @@ void input_mode_normal(char c) {
       return;
     case ':':
       statusbar_command_begin();
+      return;
+    case '/':
+      handle_find();
       return;
   }
 }
@@ -596,7 +632,6 @@ void handle_tab() {
 }
 
 void input_mode_insert(char c) {
-  is_change = 1;
   switch (c) {
     case KEYCODE_ESC:
       mode_change(MODE_NORMAL);
@@ -604,30 +639,31 @@ void input_mode_insert(char c) {
     case KEYCODE_CR:
     case KEYCODE_LF:
       enter_insert();
-      return;
+      break;
     case KEYCODE_DELETE:
       handle_backspace();
-      return;
+      break;
     case KEYCODE_TAB:
       handle_tab();
     default:
       if (!ischaracter(c)) return;
       character_insert(c);
-      return;
+      break;
   }
+  is_change = 1;
 }
 
 void input_hook() {
   char c;
-  read(0, &c, 1);
+  read(stdin, &c, 1);
 
   switch (mode) {
     case MODE_NORMAL:
-      set_statusbar_mode("[normal]");
+      set_statusbar_mode("-- NORMAL --");
       input_mode_normal(c);
       return;
     case MODE_INSERT:
-      set_statusbar_mode("[insert]");
+      set_statusbar_mode("-- INSERT --");
       input_mode_insert(c);
       return;
     default:
@@ -645,6 +681,8 @@ void init() {
   quit_flg = 0;
   cursor_init(lbp);
   statusbar_init();
+
+  memset(find_str, 0, sizeof(find_str));
 
   alloc_linebuffer(&linebuffer_head);
   alloc_linebuffer(&linebuffer_tail);
