@@ -169,7 +169,9 @@ consoleintr(int c)
       c = (c == '\r') ? '\n' : c;
 
       // echo back to the user.
-      consputc(c);
+      if (!vi_flag) {
+        consputc(c);
+      }
 
       // store for consumption by consoleread().
       cons.buf[cons.e++ % INPUT_BUF_SIZE] = c;

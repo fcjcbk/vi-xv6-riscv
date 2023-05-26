@@ -41,6 +41,8 @@
 int mode;
 int command;
 int quit_flg;
+// 1表示有更改要重画屏幕，0表示不用
+int is_change = 1;
 
 struct linebuffer {
   char *buf;
@@ -82,17 +84,23 @@ void screen_init() {
   screen.upperline = linebuffer_head.next;
   screen.line = 1;
 }
+
 void screen_up() {
   if (screen.upperline->prev == &linebuffer_head) return;
   screen.upperline = screen.upperline->prev;
   screen.line--;
+  is_change = 1;
 }
+
 void screen_down() {
   if (screen.upperline->next == &linebuffer_tail) return;
   screen.upperline = screen.upperline->next;
   screen.line++;
+  is_change = 1;
 }
+
 int is_screen_up() { return screen.upperline->prev == cursor.linebuffer; }
+
 int is_screen_down() {
   int i;
   struct linebuffer *lbp;
@@ -103,6 +111,7 @@ int is_screen_down() {
   }
   return lbp->next == cursor.linebuffer;
 }
+
 struct linebuffer *screen_top() {
   int i;
   struct linebuffer *top;
@@ -120,6 +129,7 @@ void cursor_init(struct linebuffer *lbp) {
   cursor.y = 1;
   cursor.linebuffer = lbp;
 }
+
 void terminal_cursor_update() {
   if (command) {
     term_cursor_location(STATUSBAR_MESSAGE_START + statusbar.msglength,
@@ -128,6 +138,7 @@ void terminal_cursor_update() {
     term_cursor_location(cursor.x + 1, cursor.y - screen.line + 1);
   }
 }
+
 void cursor_up() {
   if (cursor.linebuffer->prev == &linebuffer_head) return;
   cursor.linebuffer = cursor.linebuffer->prev;
@@ -136,6 +147,7 @@ void cursor_up() {
 
   if (is_screen_up()) screen_up();
 }
+
 void cursor_down() {
   if (cursor.linebuffer->next == &linebuffer_tail) return;
   cursor.linebuffer = cursor.linebuffer->next;
@@ -144,9 +156,11 @@ void cursor_down() {
 
   if (is_screen_down()) screen_down();
 }
+
 void cursor_left() {
   if (cursor.x > 0) cursor.x--;
 }
+
 void cursor_right() {
   if (cursor.x < cursor.linebuffer->size) cursor.x++;
 }
@@ -184,20 +198,31 @@ void display(struct linebuffer *head) {
   i = v ? SCREEN_HEIGHT : SCREEN_HEIGHT - 1;
   lbp = head;
 
-  term_cursor_location(0, 0);
-  fprintf(stdout, "\033[2J");
-  while (i-- > 0) {
-    fprintf(stdout, "%s\n", lbp->buf);
-    lbp = lbp->next;
+  if (is_change) {
+    term_cursor_location(0, 0);
+    fprintf(stdout, "\033[2J");
+    while (i-- > 0) {
+      fprintf(stdout, "%s\n", lbp->buf);
+      lbp = lbp->next;
+    }
+  } else {
+    // clear the status bar
+    term_cursor_location(0, SCREEN_HEIGHT + 1);
+    for (int i = 0; i < LINE_BUFFER_LENGTH; i++) {
+      printf(" ");
+    }
+    term_cursor_location(0, SCREEN_HEIGHT + 1);
   }
 
   if (v) fprintf(stdout, "%s  %s", statusbar.mode, statusbar.msg);
 
   terminal_cursor_update();
+  is_change = 0;
 }
 
 // status bar
 void set_statusbar_mode(char *m) { strcpy(statusbar.mode, m); }
+
 void statusbar_init() {
   set_statusbar_mode("[normal]");
   statusbar.visibility = STATUSBAR_VISIBLE;
@@ -210,9 +235,11 @@ void set_statusbar_message(char *m) {
   statusbar.msglength = i;
   strcpy(statusbar.msg, m);
 }
+
 void set_statusbar_visibility(int v) { statusbar.visibility = v; }
 
 void statusbar_command_end();
+
 void insert_statusbar_message(char c) {
   int i;
   for (i = 0; i + 1 < STATUSBAR_MESSAGE_LENGTH; i++) {
@@ -232,6 +259,7 @@ void insert_statusbar_message(char c) {
     }
   }
 }
+
 void clear_statusbar_message() {
   statusbar.msg[0] = '\0';
   statusbar.msglength = 0;
@@ -241,10 +269,12 @@ void statusbar_command_begin() {
   command = 1;
   set_statusbar_message(":");
 }
+
 void statusbar_command_end() {
   command = 0;
   clear_statusbar_message();
 }
+
 void statusbar_command_exec() {
   int i;
   char *arg1, *arg2;
@@ -292,12 +322,14 @@ void link_linebuffer(struct linebuffer *l, struct linebuffer *r) {
     r->prev = l;
   }
 }
+
 void alloc_linebuffer(struct linebuffer *lb) {
   lb->buf = malloc(LINE_BUFFER_LENGTH);
   lb->size = 0;
   lb->prev = 0;
   lb->next = 0;
 }
+
 struct linebuffer *create_linebuffer() {
   struct linebuffer *lbp;
   lbp = malloc(sizeof(struct linebuffer));
@@ -335,6 +367,7 @@ void delete_normal() {
   if (*(cursor.linebuffer->buf + cursor.x) == '\n' ||
       cursor.x == cursor.linebuffer->size)
     return;
+  is_change = 1;
   memmove(cursor.linebuffer->buf + cursor.x,
           cursor.linebuffer->buf + cursor.x + 1,
           cursor.linebuffer->size - cursor.x);
@@ -344,11 +377,14 @@ void delete_normal() {
 
   if (cursor.x >= cursor.linebuffer->size) cursor_left();
 }
+
 void deleteline_normal() {
   struct linebuffer *p, *n;
 
   p = cursor.linebuffer->prev;
   n = cursor.linebuffer->next;
+
+  is_change = 1;
 
   if (p == &linebuffer_head && n == &linebuffer_tail) {
     memset(cursor.linebuffer->buf, '\0', LINE_BUFFER_LENGTH);
@@ -560,6 +596,7 @@ void handle_tab() {
 }
 
 void input_mode_insert(char c) {
+  is_change = 1;
   switch (c) {
     case KEYCODE_ESC:
       mode_change(MODE_NORMAL);
