@@ -169,30 +169,6 @@ void cursor_right() {
   if (cursor.x < cursor.linebuffer->size) cursor.x++;
 }
 
-// debug, dump
-
-/*
-void dump(){
-  struct linebuffer *lbp;
-
-  fprintf(stdout, "\n=== dump ===\n");
-
-  lbp = &linebuffer_head;
-  fprintf(stdout, "---buffer---\n");
-  while(lbp != &linebuffer_tail){
-    fprintf(stdout, "%s", lbp->buf);
-    lbp = lbp->next;
-  }
-  fprintf(stdout, ":::buffer:::\n");
-  fprintf(stdout, "---cursor---\n");
-  fprintf(stdout, "x:%d, y:%d, line:%s\n", cursor.x, cursor.y,
-cursor.linebuffer->buf); fprintf(stdout, ":::cursor:::\n");
-//  fprintf(stdout, "---command---\n");
-//  fprintf(stdout, "%d\n", command);
-//  fprintf(stdout, ":::command:::\n");
-}
-*/
-
 // display
 void display(struct linebuffer *head) {
   int i, v;
@@ -590,6 +566,13 @@ void input_command(char c) {
 void handle_find() {
   int i = 0;
   char c;
+  
+  // 清空输入框
+  term_cursor_location(STATUSBAR_MESSAGE_START, SCREEN_HEIGHT + 1);
+  for (int i = 0; i < 30; i++) {
+    printf(" ");
+  }
+
   term_cursor_location(STATUSBAR_MESSAGE_START, SCREEN_HEIGHT + 1);
   printf("/");
   memset(find_str, 0, sizeof(find_str));
@@ -620,8 +603,16 @@ void handle_find() {
 void handle_reverse_find() {
   int i = 0;
   char c;
+
+  // 清空输入框
+  term_cursor_location(STATUSBAR_MESSAGE_START, SCREEN_HEIGHT + 1);
+  for (int i = 0; i < 30; i++) {
+    printf(" ");
+  }
+
   term_cursor_location(STATUSBAR_MESSAGE_START, SCREEN_HEIGHT + 1);
   printf("?");
+
   memset(find_str, 0, sizeof(find_str));
   while (read(stdin, &c, 1) > 0 && i < FIND_STR_LENGTH) {
 
