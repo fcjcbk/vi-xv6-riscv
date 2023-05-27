@@ -478,6 +478,96 @@ void quit() { quit_flg = 1; }
 
 int ischaracter(char c) { return 0x20 <= c && c <= 0x7e; }
 
+void find_string() {
+  if (find_str[0] == 0) {
+    return;
+  }
+
+  struct linebuffer *lbp = cursor.linebuffer;
+  int i = cursor.x;
+  int j = 0;
+  int found = 0;
+  char *p = 0;
+  int find_str_length = strlen(find_str);
+
+
+  while (lbp != &linebuffer_tail) {
+    p = cursor.linebuffer->buf;
+    while (i < cursor.linebuffer->size) {
+      if (p[i] == find_str[j]) {
+        i++;
+        j++;
+        if (j == find_str_length) {
+          found = 1;
+          break;
+        }
+      } else if (j != 0) {
+        j = 0;
+      } else {
+        i++;
+      }
+    }
+    if (found) break;
+    cursor_down();
+    lbp = lbp->next;
+    i = 0;
+    j = 0;
+  }
+
+  if (found) {
+    cursor.x = i - find_str_length;
+  } else {
+    error("Hit bottom. Can't find string");
+  }
+}
+
+void reverse_find_string() {
+  if (find_str[0] == 0) {
+    return;
+  }
+
+  int find_str_length = strlen(find_str);
+  struct linebuffer *lbp = cursor.linebuffer;
+  int i = cursor.x;
+  int j = find_str_length - 1;
+  int found = 0;
+  char *p = 0;
+
+
+  if (cursor.x == cursor.linebuffer->size) {
+    i--;
+  }
+
+  while (lbp != &linebuffer_head) {
+    p = cursor.linebuffer->buf;
+    while (i >= 0) {
+      if (p[i] == find_str[j]) {
+        i--;
+        j--;
+        if (j == -1) {
+          found = 1;
+          break;
+        }
+      } else if (j != find_str_length - 1) {
+        j = find_str_length - 1;
+      } else {
+        i--;
+      }
+    }
+    if (found) break;
+    cursor_up();
+    lbp = lbp->prev;
+    i = cursor.linebuffer->size - 1;
+    j = 0;
+  }
+
+  if (found) {
+    cursor.x = i + 1;
+  } else {
+    error("Hit top. Can't find string");
+  }
+}
+
 void input_command(char c) {
   switch (c) {
     case KEYCODE_ESC:
@@ -510,6 +600,37 @@ void handle_find() {
         memset(find_str, 0, sizeof(find_str));
         return;
       case '\n':
+        find_string();
+        return;
+      case KEYCODE_DELETE:
+        printf("\b \b");
+        if (i == 0) {
+          return;
+        }
+        find_str[--i] = 0;
+        break;
+      default:
+        printf("%c", c);
+        find_str[i++] = c;
+        break;
+    }
+  }
+}
+
+void handle_reverse_find() {
+  int i = 0;
+  char c;
+  term_cursor_location(STATUSBAR_MESSAGE_START, SCREEN_HEIGHT + 1);
+  printf("?");
+  memset(find_str, 0, sizeof(find_str));
+  while (read(stdin, &c, 1) > 0 && i < FIND_STR_LENGTH) {
+
+    switch (c) {
+      case KEYCODE_ESC:
+        memset(find_str, 0, sizeof(find_str));
+        return;
+      case '\n':
+        reverse_find_string();
         return;
       case KEYCODE_DELETE:
         printf("\b \b");
@@ -531,6 +652,8 @@ void input_mode_normal(char c) {
     input_command(c);
     return;
   }
+
+  clear_statusbar_message();
 
   switch (c) {
     case 'a':
@@ -564,6 +687,17 @@ void input_mode_normal(char c) {
     case '/':
       handle_find();
       return;
+    case '?':
+      handle_reverse_find();
+      return;
+    case 'n':
+      cursor_right();
+      find_string();
+      return;
+    case 'N':
+      cursor_left();
+      reverse_find_string();
+      return;
   }
 }
 
@@ -574,8 +708,8 @@ void enter_insert() {
   strcpy(lbp->buf, cursor.linebuffer->buf + cursor.x);
   lbp->size = cursor.linebuffer->size - cursor.x;
   cursor.linebuffer->size = cursor.x;
-  memset(cursor.linebuffer->buf + cursor.x + 1, '\0',
-         LINE_BUFFER_LENGTH - cursor.x - 1);
+  memset(cursor.linebuffer->buf + cursor.x, '\0',
+         LINE_BUFFER_LENGTH - cursor.x);
 
   lbpnext = cursor.linebuffer->next;
   link_linebuffer(cursor.linebuffer, lbp);
@@ -632,6 +766,8 @@ void handle_tab() {
 }
 
 void input_mode_insert(char c) {
+  clear_statusbar_message();
+
   switch (c) {
     case KEYCODE_ESC:
       mode_change(MODE_NORMAL);
