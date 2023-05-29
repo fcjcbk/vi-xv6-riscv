@@ -2,6 +2,7 @@
 #include "kernel/types.h"
 #include "kernel/stat.h"
 #include "user/user.h"
+#include "user/re.h"
 
 // screen
 //  statusbar is append after SCREEN_HEIGHT screen
@@ -39,6 +40,8 @@
 #define stdin  0
 #define NULL 0
 
+#define KEYWORD_NUM 15
+
 // globals
 int mode;
 int command;
@@ -71,9 +74,45 @@ struct screen {
   struct linebuffer *upperline;
 } screen;
 
+enum colorenum {
+  WHITE,         // 30
+  RED,           // 31
+  GREEN,         // 32
+  YELLOW,        // 33
+  BLUE,          // 34
+  MAGENTA,       // 35
+  CYAN,          // 36
+  BRIGHT_BLACK,  // 90
+  BRIGHT_RED,    // 91
+  BRIGHT_GREEN,  // 92
+  BRIGHT_YELLOW, // 93
+  BRIGHT_BLUE,   // 94
+  BRIGHT_MAGENTA,// 95
+  BRIGHT_CYAN,   // 96
+  BRIGHT_WHITE,  // 97
+};
+
+#define COLOR_clear "\e[0m"
+char colors[][9] = {"\e[1;37m", "\e[1;31m", "\e[1;32m", "\e[1;33m", "\e[1;34m",
+                        "\e[1;35m","\e[1;36m",  "\e[1;90m", "\e[1;91m",
+                    "\e[1;92m", "\e[1;93m", "\e[1;94m", "\e[1;95m",
+                    "\e[1;96m", "\e[1;97m"};
+
+struct keywrod {
+  enum colorenum color;
+  char *word;
+};
+
+enum colorenum word_color[LINE_BUFFER_LENGTH];
+
+struct keywrod keywords[] = {{RED, "("}, {RED, ")"}, {GREEN, "{"},
+                            {GREEN, "}"}, {YELLOW, "["}, {YELLOW, "]"},
+                            {BLUE, "^if$"}, {BLUE, "^else$"}, {BLUE, "^while$"},
+                            {MAGENTA, "^for$"}, {MAGENTA, "include"}, {CYAN, "^int$"},
+                            {BRIGHT_RED, "^double$"}, {BRIGHT_GREEN, "^char$"}, {BLUE, "^break$"}};
+
 char find_str[FIND_STR_LENGTH + 1];
 
-// struct termios termios;
 
 char inputfilename[64];
 char outputfilename[64];
@@ -147,7 +186,10 @@ void cursor_up() {
   if (cursor.linebuffer->prev == &linebuffer_head) return;
   cursor.linebuffer = cursor.linebuffer->prev;
   cursor.y--;
-  if (cursor.x >= cursor.linebuffer->size) cursor.x = cursor.linebuffer->size;
+  if (cursor.y == 0) {
+    exit(-1);
+  }
+  if (cursor.x > cursor.linebuffer->size) cursor.x = cursor.linebuffer->size;
 
   if (is_screen_up()) screen_up();
 }
@@ -156,7 +198,7 @@ void cursor_down() {
   if (cursor.linebuffer->next == &linebuffer_tail) return;
   cursor.linebuffer = cursor.linebuffer->next;
   cursor.y++;
-  if (cursor.x >= cursor.linebuffer->size) cursor.x = cursor.linebuffer->size;
+  if (cursor.x > cursor.linebuffer->size) cursor.x = cursor.linebuffer->size;
 
   if (is_screen_down()) screen_down();
 }
@@ -167,6 +209,60 @@ void cursor_left() {
 
 void cursor_right() {
   if (cursor.x < cursor.linebuffer->size) cursor.x++;
+}
+
+void printline(struct linebuffer *lbp) {
+  int i = 0;
+  char *p = lbp->buf;
+
+  memset(word_color, 0, sizeof(word_color));
+
+
+  while (i < lbp->size) {
+    while (i < lbp->size && p[i] == ' ') {
+      printf(" ");
+      i++;
+    }
+
+    if (i >= lbp->size) {
+      break;
+    }
+    int j = i;
+    int size = 0;
+    while (j < lbp->size && p[j] != ' ') {
+      j++;
+    }
+    size = j - i;
+    char *str = (char *)malloc(size + 1);
+    safestrcpy(str, p + i, size + 1);
+
+    // for (int k = 0; k < KEYWORD_NUM; k++) {
+    //   if (strlen(keywords[k].word) == size &&
+    //       strncmp(str, keywords[k].word, size) == 0) {
+    //     printf("%s%s%s", colors[(int)keywords[k].color], str, COLOR_clear);
+    //     is_print = 1;
+    //     break;
+    //   }
+    // }
+    int rematch_length = -1;
+    for (int k = 0; k < KEYWORD_NUM; k++) {
+      int idx = re_match(keywords[k].word, str, &rematch_length);
+      if (idx != -1) {
+        int w_index = 0;
+        while (w_index < rematch_length) {
+          word_color[idx + w_index] = (int)keywords[k].color;
+          w_index++;
+        }
+      }
+    }
+    for (int k = 0; k < strlen(str); k++) {
+      printf("%s%c%s", colors[word_color[k]], str[k], COLOR_clear);
+    }
+    memset(word_color, 0, size * sizeof(int));
+    free(str);
+    i = j;
+  }
+  printf("\n");
 }
 
 // display
@@ -182,15 +278,14 @@ void display(struct linebuffer *head) {
     term_cursor_location(0, 0);
     fprintf(stdout, "\033[2J");
     while (i-- > 0) {
-      fprintf(stdout, "%s\n", lbp->buf);
+      // fprintf(stdout, "%s\n", lbp->buf);
+      printline(lbp);
       lbp = lbp->next;
     }
   } else {
     // clear the status bar
     term_cursor_location(0, SCREEN_HEIGHT + 1);
-    for (int i = 0; i < LINE_BUFFER_LENGTH; i++) {
-      printf(" ");
-    }
+    printf("\033[2K");
     term_cursor_location(0, SCREEN_HEIGHT + 1);
   }
 
@@ -241,7 +336,7 @@ void insert_statusbar_message(char c) {
 }
 
 void clear_statusbar_message() {
-  statusbar.msg[0] = '\0';
+  memset(statusbar.msg, 0, STATUSBAR_MESSAGE_LENGTH);
   statusbar.msglength = 0;
 }
 
@@ -344,8 +439,7 @@ void mode_change(int m) {
 }
 
 void delete_normal() {
-  if (*(cursor.linebuffer->buf + cursor.x) == '\n' ||
-      cursor.x == cursor.linebuffer->size)
+  if (cursor.x == cursor.linebuffer->size)
     return;
   is_change = 1;
   memmove(cursor.linebuffer->buf + cursor.x,
@@ -355,7 +449,9 @@ void delete_normal() {
   cursor.linebuffer->buf[cursor.linebuffer->size] = '\0';
   if (cursor.linebuffer->size > 0) cursor.linebuffer->size--;
 
-  if (cursor.x >= cursor.linebuffer->size) cursor_left();
+  if (cursor.x > cursor.linebuffer->size) {
+    cursor.x = cursor.linebuffer->size;
+  }
 }
 
 void deleteline_normal() {
@@ -374,14 +470,18 @@ void deleteline_normal() {
     return;
   }
 
+  if (cursor.linebuffer == screen.upperline) {
+    screen.upperline = cursor.linebuffer->next;
+  }
   link_linebuffer(p, n);
 
   free(cursor.linebuffer->buf);
   free(cursor.linebuffer);
 
   cursor.linebuffer = n;
-  if (n == &linebuffer_tail) {
-    cursor_up();
+  cursor_up();
+  if (cursor.x > cursor.linebuffer->size) {
+    cursor.x = cursor.linebuffer->size;
   }
 }
 
@@ -493,7 +593,7 @@ void find_string() {
   if (found) {
     cursor.x = i - find_str_length;
   } else {
-    error("Hit bottom. Can't find string");
+    error("\033[31mHit bottom. Can't find string\e[0m");
   }
 }
 
@@ -501,7 +601,9 @@ void reverse_find_string() {
   if (find_str[0] == 0) {
     return;
   }
-
+  if (cursor.x == 0) {
+    cursor_up();
+  }
   int find_str_length = strlen(find_str);
   struct linebuffer *lbp = cursor.linebuffer;
   int i = cursor.x;
@@ -534,13 +636,13 @@ void reverse_find_string() {
     cursor_up();
     lbp = lbp->prev;
     i = cursor.linebuffer->size - 1;
-    j = 0;
+    j = find_str_length - 1;
   }
 
   if (found) {
     cursor.x = i + 1;
   } else {
-    error("Hit top. Can't find string");
+    error("\033[31mHit top. Can't find string\e[0m");
   }
 }
 
@@ -696,8 +798,8 @@ void enter_insert() {
   struct linebuffer *lbp, *lbpnext;
   lbp = create_linebuffer();
 
-  strcpy(lbp->buf, cursor.linebuffer->buf + cursor.x);
   lbp->size = cursor.linebuffer->size - cursor.x;
+  safestrcpy(lbp->buf, cursor.linebuffer->buf + cursor.x, lbp->size + 1);
   cursor.linebuffer->size = cursor.x;
   memset(cursor.linebuffer->buf + cursor.x, '\0',
          LINE_BUFFER_LENGTH - cursor.x);
@@ -711,6 +813,9 @@ void enter_insert() {
 }
 
 void character_insert(char c) {
+  if (cursor.linebuffer->size == LINE_BUFFER_LENGTH - 1) {
+    return;
+  }
   memmove(cursor.linebuffer->buf + (cursor.x + 1),
           cursor.linebuffer->buf + cursor.x,
           cursor.linebuffer->size - cursor.x + 1);
@@ -724,7 +829,7 @@ void handle_backspace() {
   if (cursor.x == 0 && cursor.y == 1) {
     return;
   }
-  if (cursor.x == 0 && cursor.linebuffer->size) {
+  if (cursor.x == 0) {
     if (merge_linebuffer(cursor.linebuffer->prev, cursor.linebuffer) > 0) {
       int right_size = cursor.linebuffer->size;
       deleteline_normal();
@@ -732,11 +837,7 @@ void handle_backspace() {
     }
     return;
   }
-  if (cursor.x == 0 && cursor.linebuffer->size == 0) {
-    deleteline_normal();
-    cursor.x = cursor.linebuffer->size;
-    return;
-  }
+
   if (cursor.x == cursor.linebuffer->size) {
     cursor_left();
     delete_normal();
@@ -772,6 +873,7 @@ void input_mode_insert(char c) {
       break;
     case KEYCODE_TAB:
       handle_tab();
+      break;
     default:
       if (!ischaracter(c)) return;
       character_insert(c);
@@ -813,10 +915,12 @@ void init() {
 
   alloc_linebuffer(&linebuffer_head);
   alloc_linebuffer(&linebuffer_tail);
+  linebuffer_head.prev = &linebuffer_head;
   link_linebuffer(&linebuffer_tail, &linebuffer_tail);
   link_linebuffer(&linebuffer_head, lbp);
   link_linebuffer(lbp, &linebuffer_tail);
   strcpy(linebuffer_tail.buf, "~");
+  linebuffer_tail.size = 1;
 
   // screen_init: after buffer initialization
   screen_init();
@@ -837,7 +941,7 @@ void cleanup() {
 
 // main
 int main(int argc, char *argv[]) {
-  struct linebuffer *top;
+  // struct linebuffer *top;
 
   init();
   setviflag();
@@ -848,8 +952,9 @@ int main(int argc, char *argv[]) {
   }
 
   while (1) {
-    top = screen_top();
-    display(top);
+    // top = screen_top();
+    // display(top);
+    display(screen.upperline);
     input_hook();
 
     if (quit_flg) break;
