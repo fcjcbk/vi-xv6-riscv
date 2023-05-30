@@ -87,7 +87,7 @@ $U/initcode: $U/initcode.S
 tags: $(OBJS) _init
 	etags *.S *.c
 
-ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
+ULIB = $U/re.o $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
 
 _%: %.o $(ULIB)
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $^
@@ -105,6 +105,9 @@ $U/_forktest: $U/forktest.o $(ULIB)
 	# in order to be able to max out the proc table.
 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $U/_forktest $U/forktest.o $U/ulib.o $U/usys.o
 	$(OBJDUMP) -S $U/_forktest > $U/forktest.asm
+
+# $U/re.o: $U/re.c
+# 	$(CC) $(CFLAGS) -c -o $U/re.o $U/re.c
 
 mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 	gcc -Werror -Wall -I. -o mkfs/mkfs mkfs/mkfs.c
