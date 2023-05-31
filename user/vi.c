@@ -1,8 +1,8 @@
 #include "kernel/fcntl.h"
 #include "kernel/types.h"
 #include "kernel/stat.h"
-#include "user/user.h"
 #include "user/re.h"
+#include "user/user.h"
 
 // screen
 //  statusbar is append after SCREEN_HEIGHT screen
@@ -32,12 +32,13 @@
 #define KEYCODE_AT 0x40
 #define KEYCODE_DELETE 127
 #define KEYCODE_TAB 0x9
+#define KEYCODE_CTRL_L 0x0c
 
 // esc sequence
 #define term_cursor_location(x, y) fprintf(stdout, "\033[%d;%dH", y, x)
 
 #define stdout 1
-#define stdin  0
+#define stdin 0
 #define NULL 0
 
 #define KEYWORD_NUM 15
@@ -49,11 +50,14 @@ int quit_flg;
 // 1表示有更改要重画屏幕，0表示不用
 int is_change = 1;
 
+int is_hightlight = 1;
+
 struct linebuffer {
   char *buf;
   int size;
   struct linebuffer *prev;
   struct linebuffer *next;
+  int dirty;  // 0表示为未修改，1表示当前行要重新渲染，2表示当前行要重新渲染且接下来的行要重新渲染
 } linebuffer_head, linebuffer_tail;
 
 struct cursor {
@@ -75,28 +79,27 @@ struct screen {
 } screen;
 
 enum colorenum {
-  WHITE,         // 30
-  RED,           // 31
-  GREEN,         // 32
-  YELLOW,        // 33
-  BLUE,          // 34
-  MAGENTA,       // 35
-  CYAN,          // 36
-  BRIGHT_BLACK,  // 90
-  BRIGHT_RED,    // 91
-  BRIGHT_GREEN,  // 92
-  BRIGHT_YELLOW, // 93
-  BRIGHT_BLUE,   // 94
-  BRIGHT_MAGENTA,// 95
-  BRIGHT_CYAN,   // 96
-  BRIGHT_WHITE,  // 97
+  WHITE,           // 30
+  RED,             // 31
+  GREEN,           // 32
+  YELLOW,          // 33
+  BLUE,            // 34
+  MAGENTA,         // 35
+  CYAN,            // 36
+  BRIGHT_BLACK,    // 90
+  BRIGHT_RED,      // 91
+  BRIGHT_GREEN,    // 92
+  BRIGHT_YELLOW,   // 93
+  BRIGHT_BLUE,     // 94
+  BRIGHT_MAGENTA,  // 95
+  BRIGHT_CYAN,     // 96
+  BRIGHT_WHITE,    // 97
 };
 
 #define COLOR_clear "\e[0m"
 char colors[][9] = {"\e[1;37m", "\e[1;31m", "\e[1;32m", "\e[1;33m", "\e[1;34m",
-                        "\e[1;35m","\e[1;36m",  "\e[1;90m", "\e[1;91m",
-                    "\e[1;92m", "\e[1;93m", "\e[1;94m", "\e[1;95m",
-                    "\e[1;96m", "\e[1;97m"};
+                    "\e[1;35m", "\e[1;36m", "\e[1;90m", "\e[1;91m", "\e[1;92m",
+                    "\e[1;93m", "\e[1;94m", "\e[1;95m", "\e[1;96m", "\e[1;97m"};
 
 struct keywrod {
   enum colorenum color;
@@ -105,14 +108,39 @@ struct keywrod {
 
 enum colorenum word_color[LINE_BUFFER_LENGTH];
 
-struct keywrod keywords[] = {{RED, "("}, {RED, ")"}, {GREEN, "{"},
-                            {GREEN, "}"}, {YELLOW, "["}, {YELLOW, "]"},
-                            {BLUE, "^if$"}, {BLUE, "^else$"}, {BLUE, "^while$"},
-                            {MAGENTA, "^for$"}, {MAGENTA, "include"}, {CYAN, "^int$"},
-                            {BRIGHT_RED, "^double$"}, {BRIGHT_GREEN, "^char$"}, {BLUE, "^break$"}};
+struct keywrod keywords[] = {{RED, "("},
+                             {RED, ")"},
+                             {GREEN, "{"},
+                             {GREEN, "}"},
+                             {YELLOW, "["},
+                             {YELLOW, "]"},
+                             {BLUE, "^if$"},
+                             {BLUE, "else"},
+                             {BLUE, "^while$"},
+                             {MAGENTA, "^for$"},
+                             {MAGENTA, "#include"},
+                             {CYAN, "^int$"},
+                             {BRIGHT_RED, "printf"},
+                             {BRIGHT_GREEN, "^char$"},
+                             {BLUE, "^break$"}};
+
+// struct keywrod keywords[] = {{RED, "[(|)]"},
+//                              {RED, ""},
+//                              {GREEN, "[{|}]"},
+//                              {GREEN, ""},
+//                              {YELLOW, "["},
+//                              {YELLOW, "]"},
+//                              {BLUE, "\bif\b"},
+//                              {BLUE, "\belse\b"},
+//                              {BLUE, "\bwhile\b"},
+//                              {MAGENTA, "\bfor\b"},
+//                              {MAGENTA, "#include"},
+//                              {CYAN, "^int$"},
+//                              {BRIGHT_RED, "^double$"},
+//                              {BRIGHT_GREEN, "^char$"},
+//                              {BLUE, "^break$"}};
 
 char find_str[FIND_STR_LENGTH + 1];
-
 
 char inputfilename[64];
 char outputfilename[64];
@@ -212,11 +240,12 @@ void cursor_right() {
 }
 
 void printline(struct linebuffer *lbp) {
+  lbp->dirty = 0;
+
   int i = 0;
   char *p = lbp->buf;
 
   memset(word_color, 0, sizeof(word_color));
-
 
   while (i < lbp->size) {
     while (i < lbp->size && p[i] == ' ') {
@@ -265,6 +294,36 @@ void printline(struct linebuffer *lbp) {
   printf("\n");
 }
 
+
+void printline1(struct linebuffer *lbp) {
+  lbp->dirty = 0;
+
+  char *p = lbp->buf;
+
+  memset(word_color, 0, sizeof(word_color));
+
+  for (int k = 0; k < KEYWORD_NUM; k++) {
+    int idx;
+    int len;
+    int i = 0;
+    re_t regex = re_compile(keywords[k].word);
+    while (i < lbp->size &&
+           (idx = re_matchp(regex, p + i, &len)) != -1) {
+      int w_index = 0;
+      while (w_index < len) {
+        word_color[idx + w_index] = (int)keywords[k].color;
+        w_index++;
+      }
+      i += idx + len;
+    }
+  }
+  for (int j = 0; j < lbp->size; j++) {
+    printf("%s%c%s", colors[word_color[j]], p[j], COLOR_clear);
+  }
+
+  printf("\n");
+}
+
 // display
 void display(struct linebuffer *head) {
   int i, v;
@@ -278,11 +337,32 @@ void display(struct linebuffer *head) {
     term_cursor_location(0, 0);
     fprintf(stdout, "\033[2J");
     while (i-- > 0) {
-      // fprintf(stdout, "%s\n", lbp->buf);
-      printline(lbp);
+      if (is_hightlight) {
+        fprintf(stdout, "%s\n", lbp->buf);
+      } else {
+        printline(lbp);
+      }
       lbp = lbp->next;
     }
   } else {
+    int j = 1;
+    while (j <= i) {
+      term_cursor_location(0, j);
+      if (is_change || lbp->dirty > 0) {
+        if (lbp->dirty == 2) {
+          is_change = 1;
+        }
+
+        printf("\033[2K");
+        if (is_hightlight) {
+          fprintf(stdout, "%s\n", lbp->buf);
+        } else {
+          printline(lbp);
+        }
+      }
+      lbp = lbp->next;
+      j++;
+    }
     // clear the status bar
     term_cursor_location(0, SCREEN_HEIGHT + 1);
     printf("\033[2K");
@@ -373,10 +453,14 @@ void statusbar_command_exec() {
       }
       break;
     case 'w':
-      if (*arg2 != '\0')
+      if (*arg2 != '\0') {
         strcpy(outputfilename, arg2);
-      else
+      } else if (inputfilename[0] != '\0') {
+        strcpy(outputfilename, inputfilename);
+      } else {
         strcpy(outputfilename, "default.viout");
+      }
+
       save();
       break;
     case 'q':
@@ -403,6 +487,7 @@ void alloc_linebuffer(struct linebuffer *lb) {
   lb->size = 0;
   lb->prev = 0;
   lb->next = 0;
+  lb->dirty = 0;
 }
 
 struct linebuffer *create_linebuffer() {
@@ -438,10 +523,23 @@ void mode_change(int m) {
   }
 }
 
-void delete_normal() {
-  if (cursor.x == cursor.linebuffer->size)
+void change_hightlight() {
+  if (is_hightlight) {
+    is_hightlight = 0;
+    is_change = 1;
+    error("syntax hightlight on");
     return;
+  }
+  is_hightlight = 1;
   is_change = 1;
+  error("syntax hightlight off");
+}
+
+void delete_normal() {
+  if (cursor.x == cursor.linebuffer->size) return;
+  // is_change = 1;
+  cursor.linebuffer->dirty = 1;
+
   memmove(cursor.linebuffer->buf + cursor.x,
           cursor.linebuffer->buf + cursor.x + 1,
           cursor.linebuffer->size - cursor.x);
@@ -460,13 +558,14 @@ void deleteline_normal() {
   p = cursor.linebuffer->prev;
   n = cursor.linebuffer->next;
 
-  is_change = 1;
+  // is_change = 1;
 
   if (p == &linebuffer_head && n == &linebuffer_tail) {
     memset(cursor.linebuffer->buf, '\0', LINE_BUFFER_LENGTH);
     cursor.linebuffer->size = 0;
     cursor.x = 0;
     cursor.y = 1;
+    cursor.linebuffer->dirty = 2;
     return;
   }
 
@@ -483,6 +582,7 @@ void deleteline_normal() {
   if (cursor.x > cursor.linebuffer->size) {
     cursor.x = cursor.linebuffer->size;
   }
+  cursor.linebuffer->dirty = 2;
 }
 
 // 不会读\n
@@ -512,7 +612,7 @@ void save() {
 
   lbp = linebuffer_head.next;
   while (lbp != &linebuffer_tail) {
-    fprintf(fd, "%s", lbp->buf);
+    fprintf(fd, "%s\n", lbp->buf);
     lbp = lbp->next;
   }
 
@@ -534,7 +634,7 @@ void load() {
   while (buf[0] != 0) {
     lbpnext = create_linebuffer();
     strcpy(lbpnext->buf, buf);
-    lbpnext->size = strlen(buf) - 1;
+    lbpnext->size = strlen(buf);
     link_linebuffer(lbp, lbpnext);
     lbp = lbpnext;
     memset(buf, '\0', sizeof(buf));
@@ -548,6 +648,7 @@ void load() {
   screen.upperline = linebuffer_head.next;
 
   close(fd);
+  is_change = 1;
 }
 
 void quit() { quit_flg = 1; }
@@ -565,7 +666,6 @@ void find_string() {
   int found = 0;
   char *p = 0;
   int find_str_length = strlen(find_str);
-
 
   while (lbp != &linebuffer_tail) {
     p = cursor.linebuffer->buf;
@@ -610,7 +710,6 @@ void reverse_find_string() {
   int j = find_str_length - 1;
   int found = 0;
   char *p = 0;
-
 
   if (cursor.x == cursor.linebuffer->size) {
     i--;
@@ -668,7 +767,7 @@ void input_command(char c) {
 void handle_find() {
   int i = 0;
   char c;
-  
+
   // 清空输入框
   term_cursor_location(STATUSBAR_MESSAGE_START, SCREEN_HEIGHT + 1);
   for (int i = 0; i < 30; i++) {
@@ -679,7 +778,6 @@ void handle_find() {
   printf("/");
   memset(find_str, 0, sizeof(find_str));
   while (read(stdin, &c, 1) > 0 && i < FIND_STR_LENGTH) {
-
     switch (c) {
       case KEYCODE_ESC:
         memset(find_str, 0, sizeof(find_str));
@@ -717,7 +815,6 @@ void handle_reverse_find() {
 
   memset(find_str, 0, sizeof(find_str));
   while (read(stdin, &c, 1) > 0 && i < FIND_STR_LENGTH) {
-
     switch (c) {
       case KEYCODE_ESC:
         memset(find_str, 0, sizeof(find_str));
@@ -791,6 +888,9 @@ void input_mode_normal(char c) {
       cursor_left();
       reverse_find_string();
       return;
+    case KEYCODE_CTRL_L:
+      change_hightlight();
+      return;
   }
 }
 
@@ -808,6 +908,7 @@ void enter_insert() {
   link_linebuffer(cursor.linebuffer, lbp);
   link_linebuffer(lbp, lbpnext);
 
+  cursor.linebuffer->dirty = 2;
   cursor_down();
   cursor.x = 0;
 }
@@ -821,6 +922,7 @@ void character_insert(char c) {
           cursor.linebuffer->size - cursor.x + 1);
   cursor.linebuffer->buf[cursor.x] = c;
 
+  cursor.linebuffer->dirty = 1;
   cursor.linebuffer->size++;
   cursor_right();
 }
@@ -874,12 +976,15 @@ void input_mode_insert(char c) {
     case KEYCODE_TAB:
       handle_tab();
       break;
+    case KEYCODE_CTRL_L:
+      change_hightlight();
+      break;
     default:
       if (!ischaracter(c)) return;
       character_insert(c);
       break;
   }
-  is_change = 1;
+  // is_change = 1;
 }
 
 void input_hook() {
