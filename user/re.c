@@ -40,7 +40,7 @@
 #define MAX_CHAR_CLASS_LEN      40    /* Max length of character-class buffer in.   */
 
 
-enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, /* BRANCH */ };
+enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, WORD_EDGE, /* BRANCH */ };
 
 typedef struct regex_t
 {
@@ -63,6 +63,7 @@ static int matchone(regex_t p, char c);
 static int matchdigit(char c);
 static int matchalpha(char c);
 static int matchwhitespace(char c);
+static int matchwordedge(char c);
 static int matchmetachar(char c, const char* str);
 static int matchrange(char c, const char* str);
 static int matchdot(char c);
@@ -152,6 +153,7 @@ re_t re_compile(const char* pattern)
             case 'W': {    re_compiled[j].type = NOT_ALPHA;        } break;
             case 's': {    re_compiled[j].type = WHITESPACE;       } break;
             case 'S': {    re_compiled[j].type = NOT_WHITESPACE;   } break;
+            case 'b': {    re_compiled[j].type = WORD_EDGE;        } break;
 
             /* Escaped character, e.g. '.' or '$' */
             default:
@@ -251,7 +253,7 @@ re_t re_compile(const char* pattern)
 
 void re_print(regex_t* pattern)
 {
-  const char* types[] = { "UNUSED", "DOT", "BEGIN", "END", "QUESTIONMARK", "STAR", "PLUS", "CHAR", "CHAR_CLASS", "INV_CHAR_CLASS", "DIGIT", "NOT_DIGIT", "ALPHA", "NOT_ALPHA", "WHITESPACE", "NOT_WHITESPACE", "BRANCH" };
+  const char* types[] = { "UNUSED", "DOT", "BEGIN", "END", "QUESTIONMARK", "STAR", "PLUS", "CHAR", "CHAR_CLASS", "INV_CHAR_CLASS", "DIGIT", "NOT_DIGIT", "ALPHA", "NOT_ALPHA", "WHITESPACE", "NOT_WHITESPACE", "BRANCH", "WORD_EDGE" };
 
   int i;
   int j;
@@ -311,6 +313,10 @@ static int matchwhitespace(char c)
 {
   return isspace(c);
 }
+static int matchwordedge(char c)
+{
+  return !matchdigit(c) && !matchalpha(c); // 单词边界，非数字或字符
+}
 static int matchalphanum(char c)
 {
   return ((c == '_') || matchalpha(c) || matchdigit(c));
@@ -349,6 +355,7 @@ static int matchmetachar(char c, const char* str)
     case 'W': return !matchalphanum(c);
     case 's': return  matchwhitespace(c);
     case 'S': return !matchwhitespace(c);
+    case 'b': return matchwordedge(c);
     default:  return (c == str[0]);
   }
 }
@@ -404,6 +411,7 @@ static int matchone(regex_t p, char c)
     case NOT_ALPHA:      return !matchalphanum(c);
     case WHITESPACE:     return  matchwhitespace(c);
     case NOT_WHITESPACE: return !matchwhitespace(c);
+    case WORD_EDGE:      return matchwordedge(c);
     default:             return  (p.u.ch == c);
   }
 }
