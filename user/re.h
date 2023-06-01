@@ -57,6 +57,8 @@ int re_matchp(re_t pattern, const char* text, int* matchlength);
 /* Find matches of the txt pattern inside text (will compile automatically first). */
 int re_match(const char* pattern, const char* text, int* matchlength);
 
+int isdigit(char c);
+int isalpha(char c);
 
 #ifdef __cplusplus
 }
