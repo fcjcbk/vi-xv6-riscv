@@ -78,6 +78,8 @@ struct screen {
   struct linebuffer *upperline;
 } screen;
 
+struct linebuffer *last_delete_line = 0;
+
 enum colorenum {
   WHITE,           // 30
   RED,             // 31
@@ -104,41 +106,42 @@ char colors[][9] = {"\e[1;37m", "\e[1;31m", "\e[1;32m", "\e[1;33m", "\e[1;34m",
 struct keywrod {
   enum colorenum color;
   char *word;
+  int flag;
 };
 
 enum colorenum word_color[LINE_BUFFER_LENGTH];
 
-struct keywrod keywords[] = {{RED, "("},
-                             {RED, ")"},
-                             {GREEN, "{"},
-                             {GREEN, "}"},
-                             {YELLOW, "["},
-                             {YELLOW, "]"},
-                             {BLUE, "^if$"},
-                             {BLUE, "else"},
-                             {BLUE, "^while$"},
-                             {MAGENTA, "^for$"},
-                             {MAGENTA, "#include"},
-                             {CYAN, "^int$"},
-                             {BRIGHT_RED, "printf"},
-                             {BRIGHT_GREEN, "^char$"},
-                             {BLUE, "^break$"}};
-
-// struct keywrod keywords[] = {{RED, "[(|)]"},
-//                              {RED, ""},
-//                              {GREEN, "[{|}]"},
-//                              {GREEN, ""},
+// struct keywrod keywords[] = {{RED, "("},
+//                              {RED, ")"},
+//                              {GREEN, "{"},
+//                              {GREEN, "}"},
 //                              {YELLOW, "["},
 //                              {YELLOW, "]"},
-//                              {BLUE, "\bif\b"},
-//                              {BLUE, "\belse\b"},
-//                              {BLUE, "\bwhile\b"},
-//                              {MAGENTA, "\bfor\b"},
+//                              {BLUE, "^if$"},
+//                              {BLUE, "else"},
+//                              {BLUE, "^while$"},
+//                              {MAGENTA, "^for$"},
 //                              {MAGENTA, "#include"},
 //                              {CYAN, "^int$"},
-//                              {BRIGHT_RED, "^double$"},
+//                              {BRIGHT_RED, "printf"},
 //                              {BRIGHT_GREEN, "^char$"},
 //                              {BLUE, "^break$"}};
+
+struct keywrod keywords[] = {{RED, "(", 0},
+                             {RED, ")", 0},
+                             {GREEN, "{", 0},
+                             {GREEN, "}", 0},
+                             {YELLOW, "[", 0},
+                             {YELLOW, "]", 0},
+                             {BLUE, "\\b?if\\b?", 1},
+                             {BLUE, "\\b?else\\b?", 1},
+                             {BLUE, "\\b?while\\b?", 1},
+                             {MAGENTA, "\\b?for\\b?", 1},
+                             {MAGENTA, "\\b?include\\b?", 1},
+                             {CYAN, "\\b?int\\b?", 1},
+                             {BRIGHT_RED, "\\b?double\\b?", 1},
+                             {BRIGHT_GREEN, "\\b?printf\\b?", 1},
+                             {BLUE, "\\b?break\\b?", 1}};
 
 char find_str[FIND_STR_LENGTH + 1];
 
@@ -265,14 +268,6 @@ void printline(struct linebuffer *lbp) {
     char *str = (char *)malloc(size + 1);
     safestrcpy(str, p + i, size + 1);
 
-    // for (int k = 0; k < KEYWORD_NUM; k++) {
-    //   if (strlen(keywords[k].word) == size &&
-    //       strncmp(str, keywords[k].word, size) == 0) {
-    //     printf("%s%s%s", colors[(int)keywords[k].color], str, COLOR_clear);
-    //     is_print = 1;
-    //     break;
-    //   }
-    // }
     int rematch_length = -1;
     for (int k = 0; k < KEYWORD_NUM; k++) {
       int idx = re_match(keywords[k].word, str, &rematch_length);
@@ -294,6 +289,10 @@ void printline(struct linebuffer *lbp) {
   printf("\n");
 }
 
+int matchwordedge(char c)
+{
+  return !isdigit(c) && !isalpha(c); // 单词边界，非数字或字符
+}
 
 void printline1(struct linebuffer *lbp) {
   lbp->dirty = 0;
@@ -311,7 +310,9 @@ void printline1(struct linebuffer *lbp) {
            (idx = re_matchp(regex, p + i, &len)) != -1) {
       int w_index = 0;
       while (w_index < len) {
-        word_color[idx + w_index] = (int)keywords[k].color;
+        if (!keywords[k].flag || !matchwordedge(p[idx + w_index])) {
+          word_color[idx + w_index] = (int)keywords[k].color;
+        }
         w_index++;
       }
       i += idx + len;
@@ -340,7 +341,7 @@ void display(struct linebuffer *head) {
       if (is_hightlight) {
         fprintf(stdout, "%s\n", lbp->buf);
       } else {
-        printline(lbp);
+        printline1(lbp);
       }
       lbp = lbp->next;
     }
@@ -357,7 +358,7 @@ void display(struct linebuffer *head) {
         if (is_hightlight) {
           fprintf(stdout, "%s\n", lbp->buf);
         } else {
-          printline(lbp);
+          printline1(lbp);
         }
       }
       lbp = lbp->next;
@@ -561,6 +562,16 @@ void deleteline_normal() {
   // is_change = 1;
 
   if (p == &linebuffer_head && n == &linebuffer_tail) {
+    
+    // 保存删除的行以便等会复制时恢复
+    if (last_delete_line != NULL) {
+      free(last_delete_line->buf);
+      free(last_delete_line);
+    }
+    last_delete_line = create_linebuffer();
+    memcpy(last_delete_line->buf, cursor.linebuffer->buf, LINE_BUFFER_LENGTH);
+    last_delete_line->size = cursor.linebuffer->size;
+
     memset(cursor.linebuffer->buf, '\0', LINE_BUFFER_LENGTH);
     cursor.linebuffer->size = 0;
     cursor.x = 0;
@@ -574,8 +585,12 @@ void deleteline_normal() {
   }
   link_linebuffer(p, n);
 
-  free(cursor.linebuffer->buf);
-  free(cursor.linebuffer);
+  // 保存删除的行以便等会复制时恢复
+  if (last_delete_line != NULL) {
+    free(last_delete_line->buf);
+    free(last_delete_line);
+  }
+  last_delete_line = cursor.linebuffer;
 
   cursor.linebuffer = n;
   cursor_up();
@@ -837,6 +852,24 @@ void handle_reverse_find() {
   }
 }
 
+// 将行挂到当前行的下一行，同时光标下移
+void paste_line() {
+  if (last_delete_line == NULL) {
+    return;
+  }
+  last_delete_line->dirty = 2;
+  struct linebuffer *next_line = cursor.linebuffer->next;
+  link_linebuffer(cursor.linebuffer, last_delete_line);
+  link_linebuffer(last_delete_line, next_line);
+  cursor_down();
+  cursor.x = 0;
+
+  struct linebuffer *new_line = create_linebuffer();
+  new_line->size = last_delete_line->size;
+  memcpy(new_line->buf, last_delete_line->buf, LINE_BUFFER_LENGTH);
+  last_delete_line = new_line;
+}
+
 void input_mode_normal(char c) {
   if (command) {
     input_command(c);
@@ -890,6 +923,9 @@ void input_mode_normal(char c) {
       return;
     case KEYCODE_CTRL_L:
       change_hightlight();
+      return;
+    case 'p':
+      paste_line();
       return;
   }
 }
@@ -1042,6 +1078,10 @@ void cleanup() {
   }
   free(linebuffer_head.buf);
   free(linebuffer_tail.buf);
+  if (last_delete_line != NULL) {
+    free(last_delete_line->buf);
+    free(last_delete_line);
+  }
 }
 
 // main
